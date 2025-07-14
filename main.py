@@ -5,150 +5,109 @@ from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackContext
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    ContextTypes, filters
 )
 from asyncio import create_task
 
-TOKEN = "8147087924:AAH-U9f5_vK1cpH1-kYqFHRjQacuLouvXVQ"
+TOKEN = "TU_TOKEN_AQUI"
 GRUPO_ID = -1001169225264
 
 messages = []
 replies = defaultdict(list)
+mentions = defaultdict(list)
 
-def guardar_datos():
-    with open("interacciones.json", "w") as f:
-        json.dump(messages, f)
-
-def cargar_datos():
-    global messages
-    try:
-        with open("interacciones.json", "r") as f:
-            messages = json.load(f)
-    except:
-        messages = []
-
-def contar_interacciones():
-    interacciones = defaultdict(int)
-    for m in messages:
-        if m['reply_to']:
-            pareja = tuple(sorted([m['user'], m['reply_to']]))
-            interacciones[pareja] += 1
-    return interacciones
-
-def obtener_pareja_top():
-    interacciones = contar_interacciones()
-    if interacciones:
-        top = max(interacciones.items(), key=lambda x: x[1])
-        return top
-    return None
-
-# Mensajes automáticos por palabras
-def respuesta_automatica(text):
-    texto = text.lower()
-    if "franco" in texto:
-        return "Arriba España 🤚"
-    if "bro" in texto:
-        return random.choice([
-            "Masivo bro", "Siempre ganando", "Hay niveles bro", "Fucking panzas"
-        ])
-    if "moros" in texto:
-        return "Moros no, España no es un zoo"
-    if "negros" in texto:
-        return "No soy racista, soy ordenado. Dios creó continentes por algo."
-    if "charo" in texto:
-        return random.choice([
-            "Sola y borracha quiero llegar a casa",
-            "La culpa es del heteropatriarcado",
-            "Pedro Sánchez es muy guapo"
-        ])
-    return None
-
-# Comandos
-async def pareja_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    top = obtener_pareja_top()
-    if top:
-        await update.message.reply_text(
-            f"💘 Pareja del día: {top[0][0]} & {top[0][1]} con {top[1]} interacciones."
-        )
-    else:
-        await update.message.reply_text("No hay suficientes interacciones para determinar pareja.")
-
-async def mensaje_automatico_pareja(context: CallbackContext):
-    top = obtener_pareja_top()
-    if top:
-        await context.bot.send_message(
-            chat_id=GRUPO_ID,
-            text=f"💘 Pareja del día: {top[0][0]} & {top[0][1]} con {top[1]} interacciones."
-        )
+# ──── COMANDOS ────
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conteo = Counter(m['user'] for m in messages)
-    total = sum(conteo.values())
-    top = conteo.most_common(10)
-    texto = "\n".join([f"{u}: {c} mensajes" for u, c in top])
-    await update.message.reply_text(f"📊 Top usuarios activos:\n{texto}")
+    counter = Counter(msg['user'] for msg in messages)
+    top = counter.most_common(10)
+    text = "📊 Top usuarios activos:\n" + "\n".join(f"{u}: {c} mensajes" for u, c in top)
+    await update.message.reply_text(text)
+
+async def interacciones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pair_counts = Counter()
+    for msg in messages:
+        for reply_to in msg.get("replied_to", []):
+            pair = (msg["user"], reply_to)
+            pair_counts[pair] += 1
+    texto = "💬 Interacciones globales:\n"
+    for (a, b), c in pair_counts.most_common(10):
+        texto += f"{a} → {b}: {c} interacciones\n"
+    await update.message.reply_text(texto)
 
 async def menciones_juan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conteo = Counter()
-    for m in messages:
-        if "juan" in m["text"].lower():
-            conteo[m["user"]] += 1
-    if conteo:
-        texto = "\n".join([f"{u}: {c} menciones a Juan" for u, c in conteo.most_common()])
-        await update.message.reply_text(f"📣 Menciones a Juan:\n{texto}")
+    juan_mentions = Counter()
+    for msg in messages:
+        if 'juan' in msg['text'].lower():
+            juan_mentions[msg['user']] += 1
+    if not juan_mentions:
+        await update.message.reply_text("Nadie ha mencionado a Juan aún.")
     else:
-        await update.message.reply_text("Nadie ha mencionado a Juan todavía.")
+        text = "📰 Menciones a Juan:\n" + "\n".join(f"{u}: {c} menciones" for u, c in juan_mentions.items())
+        await update.message.reply_text(text)
 
-async def ranking_menciones(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ranking = defaultdict(Counter)
-    for m in messages:
-        if m['reply_to']:
-            ranking[m["user"]][m["reply_to"]] += 1
-    resultado = []
-    for emisor in ranking:
-        for receptor, cantidad in ranking[emisor].items():
-            resultado.append((emisor, receptor, cantidad))
-    resultado.sort(key=lambda x: x[2], reverse=True)
-    texto = "\n".join([f"{a} → {b}: {n} interacciones" for a, b, n in resultado[:15]])
-    if texto:
-        await update.message.reply_text("🏷 Ranking de menciones e interacciones:\n" + texto)
-    else:
-        await update.message.reply_text("No hay interacciones registradas aún.")
+async def pareja_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(calcular_pareja_dia())
 
-async def raw(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Total de mensajes almacenados: {len(messages)}")
+# ──── PAREJA AUTOMÁTICA ────
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message and update.message.chat_id == GRUPO_ID:
-        msg = update.message
-        texto = msg.text or ""
-        messages.append({
-            "user": msg.from_user.first_name,
-            "user_id": msg.from_user.id,
-            "text": texto,
-            "reply_to": msg.reply_to_message.from_user.first_name if msg.reply_to_message else None,
-            "timestamp": msg.date.isoformat(),
-            "chat_id": msg.chat_id
-        })
-        guardar_datos()
+def calcular_pareja_dia():
+    counter = Counter()
+    for msg in messages:
+        for replied in msg.get("replied_to", []):
+            counter[(msg["user"], replied)] += 1
+        for mention in msg.get("mentions", []):
+            counter[(msg["user"], mention)] += 1
+    if not counter:
+        return "Aún no hay suficientes interacciones para determinar la pareja del día."
+    (user1, user2), total = counter.most_common(1)[0]
+    return f"💘 La pareja del día es: {user1} 💞 {user2} con {total} interacciones"
 
-        respuesta = respuesta_automatica(texto)
-        if respuesta:
-            await update.message.reply_text(respuesta)
+async def mensaje_automatico_pareja(context: ContextTypes.DEFAULT_TYPE):
+    text = calcular_pareja_dia()
+    await context.bot.send_message(chat_id=GRUPO_ID, text=text)
 
-# Inicialización
+# ──── MANEJO DE MENSAJES ────
+
+async def manejar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    usuario = msg.from_user.full_name
+    texto = msg.text or ""
+
+    menciones_en_msg = [e.user.full_name for e in msg.entities if e.type == "mention"] if msg.entities else []
+
+    info_msg = {
+        "user": usuario,
+        "text": texto,
+        "mentions": [],
+        "replied_to": []
+    }
+
+    if msg.reply_to_message:
+        info_msg["replied_to"].append(msg.reply_to_message.from_user.full_name)
+
+    if "juan" in texto.lower():
+        info_msg["mentions"].append("Juan")
+
+    messages.append(info_msg)
+
+    if any(word in texto.lower() for word in ["franco", "pro", "facha", "comunista"]):
+        await msg.reply_text("🧠 Mensaje detectado con contenido político.")
+
+# ──── MAIN ────
+
 if __name__ == "__main__":
-    cargar_datos()
     app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CommandHandler("pareja_dia", pareja_dia))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("interacciones", interacciones))
     app.add_handler(CommandHandler("menciones_juan", menciones_juan))
-    app.add_handler(CommandHandler("ranking_menciones", ranking_menciones))
-    app.add_handler(CommandHandler("raw", raw))
+    app.add_handler(CommandHandler("pareja_dia", pareja_dia))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), manejar_mensaje))
 
-    # Enviar pareja cada 1 hora
+    # TAREA AUTOMÁTICA CADA HORA
     app.job_queue.run_repeating(mensaje_automatico_pareja, interval=3600, first=10)
 
+    print("Bot corriendo...")
     app.run_polling()
