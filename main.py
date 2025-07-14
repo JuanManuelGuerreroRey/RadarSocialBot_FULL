@@ -1,191 +1,172 @@
 import os
 import json
-import random
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes,
-    MessageHandler, filters
+    ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 )
-from sumy.parsers.plaintext import PlaintextParser
-from sumy.nlp.tokenizers import Tokenizer
-from sumy.summarizers.lex_rank import LexRankSummarizer
-import nltk
 
-nltk.download("punkt")
-
-# Configuración
 TOKEN = "8147087924:AAH-U9f5_vK1cpH1-kYqFHRjQacuLouvXVQ"
 GRUPO_ID = -1001169225264
 
 messages = []
-interacciones = defaultdict(lambda: defaultdict(int))
-mensajes_para_resumen = []
-resumen_counter = 0
-pareja_counter = 0
+replies = defaultdict(list)
+contador_mensajes = 0
 
-# Guardar mensajes
-def guardar():
-    with open("mensajes.json", "w") as f:
-        json.dump(messages, f)
-
-# Cargar mensajes
-def cargar():
+# Cargar mensajes anteriores si existen
+def cargar_datos():
     global messages
-    try:
-        with open("mensajes.json", "r") as f:
+    if os.path.exists("interacciones.json"):
+        with open("interacciones.json", "r") as f:
             messages = json.load(f)
-    except:
+    else:
         messages = []
 
-# Manejador de texto
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global resumen_counter, pareja_counter
-    msg = update.message
-    if msg.chat_id != GRUPO_ID or not msg.text:
-        return
+# Guardar mensajes nuevos
+def guardar_datos():
+    with open("interacciones.json", "w") as f:
+        json.dump(messages, f)
 
-    user = msg.from_user.first_name
-    reply_to = msg.reply_to_message.from_user.first_name if msg.reply_to_message else None
-    text = msg.text.strip()
-
-    messages.append({
-        "user": user,
-        "text": text,
-        "reply_to": reply_to,
-        "timestamp": msg.date.isoformat()
-    })
-
-    mensajes_para_resumen.append(text)
-    resumen_counter += 1
-    pareja_counter += 1
-
-    if reply_to:
-        interacciones[user][reply_to] += 1
-
-    if "franco" in text.lower():
-        await msg.reply_text("Arriba España 🤚")
-    if "bro" in text.lower():
-        await msg.reply_text(random.choice(["Masivo bro", "Siempre ganando", "Hay niveles bro", "Fucking panzas"]))
-    if "moros" in text.lower():
-        await msg.reply_text("Moros no, España no es un zoo.")
-    if "negros" in text.lower():
-        await msg.reply_text("No soy racista, soy ordenado. Dios creó el mundo en diversos continentes, por algo será.")
-    if "charo" in text.lower():
-        await msg.reply_text(random.choice([
-            "Sola y borracha quiero llegar a casa",
-            "La culpa es del heteropatriarcado",
-            "Pedro Sánchez es muy guapo"
-        ]))
-
-    # Resumen automático
-    if resumen_counter >= 300:
-        resumen = generar_resumen("\n".join(mensajes_para_resumen[-300:]))
-        await context.bot.send_message(chat_id=GRUPO_ID, text=f"📝 Resumen del grupo:\n{resumen}")
-        resumen_counter = 0
-
-    # Pareja automática
-    if pareja_counter >= 400:
-        pareja = calcular_pareja(1)
-        if pareja:
-            await context.bot.send_message(chat_id=GRUPO_ID, text=f"💘 Pareja del día: {pareja[0]} & {pareja[1]}")
-        pareja_counter = 0
-
-    guardar()
-
-def calcular_pareja(dias):
-    ahora = datetime.utcnow()
-    desde = ahora - timedelta(days=dias)
-    conteo = Counter()
-    for m in messages:
-        if m["reply_to"]:
-            tiempo = datetime.fromisoformat(m["timestamp"])
-            if tiempo > desde:
-                pareja = tuple(sorted([m["user"], m["reply_to"]]))
-                conteo[pareja] += 1
-    if conteo:
-        return conteo.most_common(1)[0][0]
-    return None
-
-def generar_resumen(texto):
-    parser = PlaintextParser.from_string(texto, Tokenizer("spanish"))
-    summarizer = LexRankSummarizer()
-    resumen = summarizer(parser.document, 3)
-    return "\n".join(str(s) for s in resumen)
+# -------------------- COMANDOS -----------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 Radar Social Bot está activo.")
+    await update.message.reply_text("Bot activo y funcionando correctamente.")
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📋 Comandos disponibles:\n"
+        "/interacciones - Ranking de interacciones\n"
+        "/pareja_dia - Pareja del día\n"
+        "/pareja_semana - Pareja de la semana\n"
+        "/pareja_mes - Pareja del mes\n"
+        "/resumen - Resumen del día\n"
+        "/stats - Top usuarios por mensajes\n"
+        "/menciones_juan - Quién menciona más a Juan\n"
+        "/ranking_menciones - Quién menciona a quién"
+    )
+
+# Registrar mensajes
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global contador_mensajes
+    msg = update.message
+    if msg.chat_id == GRUPO_ID:
+        contador_mensajes += 1
+        messages.append({
+            "user": msg.from_user.first_name,
+            "user_id": msg.from_user.id,
+            "text": msg.text,
+            "reply_to": msg.reply_to_message.from_user.first_name if msg.reply_to_message else None,
+            "timestamp": msg.date.isoformat()
+        })
+        guardar_datos()
+
+        # Triggers automáticos
+        if "Franco" in msg.text:
+            await msg.reply_text("Arriba España 🤚")
+        if "moros" in msg.text:
+            await msg.reply_text("Moros no, España no es un zoo.")
+        if "negros" in msg.text:
+            await msg.reply_text("No soy racista, soy ordenado...")
+        if "charo" in msg.text:
+            await msg.reply_text(random.choice([
+                "Sola y borracha quiero llegar a casa",
+                "La culpa es del heteropatriarcado",
+                "Pedro Sánchez es muy guapo"
+            ]))
+        if "bro" in msg.text.lower():
+            await msg.reply_text(random.choice([
+                "Masivo bro", "Siempre ganando", "Hay niveles bro", "Fucking panzas"
+            ]))
+
+        # Lanzar pareja del día cada 400 mensajes
+        if contador_mensajes % 400 == 0:
+            await pareja_periodo(update, context, modo="dia", auto=True)
+
+# Pareja del día / semana / mes
+async def pareja_periodo(update: Update, context: ContextTypes.DEFAULT_TYPE, modo=None, auto=False):
+    now = datetime.utcnow()
+    if not modo:
+        modo = update.message.text.replace("/", "")
+    dias = {"dia": 1, "semana": 7, "mes": 30}
+    desde = now - timedelta(days=dias.get(modo, 1))
+    interacciones = Counter()
+
+    for m in messages:
+        fecha = datetime.fromisoformat(m['timestamp'])
+        if fecha > desde and m['reply_to']:
+            pareja = tuple(sorted([m['user'], m['reply_to']]))
+            interacciones[pareja] += 1
+
+    if interacciones:
+        top = interacciones.most_common(1)[0]
+        texto = f"💘 Pareja del {modo}: {top[0][0]} & {top[0][1]} con {top[1]} interacciones."
+    else:
+        texto = "No hay suficientes interacciones todavía."
+
+    if auto:
+        await context.bot.send_message(chat_id=GRUPO_ID, text=texto)
+    else:
+        await update.message.reply_text(texto)
+
+# Interacciones globales
+async def interacciones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conteo = Counter()
+    for m in messages:
+        if m['reply_to']:
+            key = f"{m['user']} ➡️ {m['reply_to']}"
+            conteo[key] += 1
+    if conteo:
+        ranking = "\n".join([f"{k}: {v}" for k, v in conteo.most_common(20)])
+        await update.message.reply_text(f"📊 Interacciones:\n{ranking}")
+    else:
+        await update.message.reply_text("Aún no hay interacciones registradas.")
+
+# Stats de usuarios
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conteo = Counter(m["user"] for m in messages)
-    top = conteo.most_common(10)
-    texto = "\n".join([f"{u}: {c} mensajes" for u, c in top])
-    await update.message.reply_text(f"📊 Top usuarios activos:\n{texto}")
+    conteo = Counter(m['user'] for m in messages)
+    ranking = "\n".join([f"{u}: {c} mensajes" for u, c in conteo.most_common(10)])
+    await update.message.reply_text(f"📊 Top usuarios activos:\n{ranking}")
 
-async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    resumen = generar_resumen("\n".join(m.text for m in messages[-300:] if m.get("text")))
-    await update.message.reply_text(f"🧠 Resumen del grupo:\n{resumen}")
-
-async def interacciones_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    resultado = []
-    for usuario, targets in interacciones.items():
-        for objetivo, conteo in targets.items():
-            resultado.append((usuario, objetivo, conteo))
-    resultado.sort(key=lambda x: -x[2])
-    texto = "\n".join([f"{a} → {b}: {n} interacciones" for a, b, n in resultado])
-    await update.message.reply_text(f"🔁 Interacciones globales:\n{texto}")
-
+# Menciones a Juan
 async def menciones_juan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conteo = Counter()
     for m in messages:
         if "juan" in m["text"].lower():
             conteo[m["user"]] += 1
-    texto = "\n".join([f"{u}: {c} menciones" for u, c in conteo.most_common(10)])
-    await update.message.reply_text(f"🧾 Menciones a Juan:\n{texto}")
+    if conteo:
+        ranking = "\n".join([f"{u}: {c} menciones" for u, c in conteo.most_common()])
+        await update.message.reply_text(f"🔍 Menciones a Juan:\n{ranking}")
+    else:
+        await update.message.reply_text("Nadie ha mencionado a Juan aún.")
 
+# Ranking menciones generales
 async def ranking_menciones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conteo = Counter()
     for m in messages:
-        for otro in interacciones[m["user"]]:
-            conteo[(m["user"], otro)] += interacciones[m["user"]][otro]
-    texto = "\n".join([f"{a} → {b}: {n}" for (a, b), n in conteo.most_common(10)])
-    await update.message.reply_text(f"📈 Ranking de menciones:\n{texto}")
-
-async def pareja_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pareja = calcular_pareja(1)
-    if pareja:
-        await update.message.reply_text(f"💘 Pareja del día: {pareja[0]} & {pareja[1]}")
+        if m['reply_to']:
+            key = f"{m['user']} ➡️ {m['reply_to']}"
+            conteo[key] += 1
+    if conteo:
+        top = "\n".join([f"{k}: {v} veces" for k, v in conteo.most_common(10)])
+        await update.message.reply_text(f"📈 Ranking menciones:\n{top}")
     else:
-        await update.message.reply_text("No hay suficientes datos aún.")
+        await update.message.reply_text("Aún no hay suficientes menciones.")
 
-async def pareja_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pareja = calcular_pareja(7)
-    if pareja:
-        await update.message.reply_text(f"💞 Pareja de la semana: {pareja[0]} & {pareja[1]}")
-    else:
-        await update.message.reply_text("No hay suficientes datos aún.")
-
-async def pareja_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pareja = calcular_pareja(30)
-    if pareja:
-        await update.message.reply_text(f"💍 Pareja del mes: {pareja[0]} & {pareja[1]}")
-    else:
-        await update.message.reply_text("No hay suficientes datos aún.")
-
+# -------------------- MAIN -----------------------
 if __name__ == "__main__":
-    cargar()
+    cargar_datos()
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("pareja_dia", lambda u, c: pareja_periodo(u, c, "dia")))
+    app.add_handler(CommandHandler("pareja_semana", lambda u, c: pareja_periodo(u, c, "semana")))
+    app.add_handler(CommandHandler("pareja_mes", lambda u, c: pareja_periodo(u, c, "mes")))
+    app.add_handler(CommandHandler("interacciones", interacciones))
     app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("resumen", resumen))
-    app.add_handler(CommandHandler("interacciones", interacciones_cmd))
     app.add_handler(CommandHandler("menciones_juan", menciones_juan))
     app.add_handler(CommandHandler("ranking_menciones", ranking_menciones))
-    app.add_handler(CommandHandler("pareja_dia", pareja_dia))
-    app.add_handler(CommandHandler("pareja_semana", pareja_semana))
-    app.add_handler(CommandHandler("pareja_mes", pareja_mes))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     app.run_polling()
