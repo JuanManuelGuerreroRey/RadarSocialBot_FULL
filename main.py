@@ -1,58 +1,117 @@
-RadarSocialBot - Versión de prueba
+# RadarSocialBot - Versión de prueba
 
-from telegram import Update from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes import json from collections import defaultdict
+import logging
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
+from collections import defaultdict
+import datetime
 
-Variables simuladas para esta prueba
+# Token e ID del grupo
+TOKEN = "8147087924:AAH-U9f5_vK1cpH1-kYqFHRjQacuLouvXVQ"
+GROUP_ID = -1001169225264
 
-TOKEN = "AQUÍ_TU_TOKEN" GROUP_ID = -1001169225264
+# Diccionarios y contadores
+usuarios_activos = defaultdict(int)
+menciones_juan = defaultdict(int)
+interacciones = defaultdict(lambda: defaultdict(int))
+mensajes_guardados = []
 
-Diccionarios globales
+# Logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
-interacciones = defaultdict(lambda: defaultdict(int)) mensajes_por_usuario = defaultdict(int) menciones_a_juan = defaultdict(int) mensaje_count = 0
+# --- Funciones de comandos ---
 
-Comando para mostrar top de mensajes por usuario
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot activo y funcionando correctamente.")
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE): top = sorted(mensajes_por_usuario.items(), key=lambda x: x[1], reverse=True) texto = "\ud83d\udcca Top usuarios activos:\n" + "\n".join([f"{k}: {v} mensajes" for k, v in top]) await context.bot.send_message(chat_id=update.effective_chat.id, text=texto)
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != GROUP_ID:
+        return
+    ranking = sorted(usuarios_activos.items(), key=lambda x: x[1], reverse=True)[:10]
+    respuesta = "📊 Top usuarios activos:\n"
+    for user, count in ranking:
+        respuesta += f"{user}: {count} mensajes\n"
+    await update.message.reply_text(respuesta)
 
-Comando para mostrar interacciones
+async def menciones_juan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != GROUP_ID:
+        return
+    if not menciones_juan:
+        await update.message.reply_text("Nadie ha mencionado a Juan aún.")
+        return
+    respuesta = "📰 Menciones a Juan:\n"
+    for user, count in menciones_juan.items():
+        respuesta += f"{user}: {count} menciones\n"
+    await update.message.reply_text(respuesta)
 
-async def interacciones_globales(update: Update, context: ContextTypes.DEFAULT_TYPE): texto = "\ud83d\udcc8 Interacciones globales:\n" for u1 in interacciones: for u2 in interacciones[u1]: texto += f"{u1} → {u2}: {interacciones[u1][u2]} interacciones\n" await context.bot.send_message(chat_id=update.effective_chat.id, text=texto)
+async def interacciones_globales(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != GROUP_ID:
+        return
+    respuesta = "💬 Interacciones globales:\n"
+    for user1, targets in interacciones.items():
+        for user2, count in targets.items():
+            respuesta += f"{user1} → {user2}: {count} interacciones\n"
+    await update.message.reply_text(respuesta)
 
-Comando para mostrar menciones a Juan
+# Puedes añadir aquí las funciones de pareja del día, resumen, etc.
 
-async def menciones_juan(update: Update, context: ContextTypes.DEFAULT_TYPE): texto = "\ud83d\udcc4 Menciones a Juan:\n" for usuario, count in menciones_a_juan.items(): texto += f"{usuario}: {count} menciones\n" if not menciones_a_juan: texto += "Nadie ha mencionado a Juan aún." await context.bot.send_message(chat_id=update.effective_chat.id, text=texto)
+# --- Manejador de mensajes ---
+async def registrar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != GROUP_ID:
+        return
+    autor = update.effective_user.full_name
+    texto = update.message.text or ""
 
-Comando de contador para debug
+    usuarios_activos[autor] += 1
+    mensajes_guardados.append(texto)
 
-async def contador(update: Update, context: ContextTypes.DEFAULT_TYPE): await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Mensajes contados: {mensaje_count}")
+    # Menciones directas a Juan
+    if "juan" in texto.lower():
+        menciones_juan[autor] += 1
 
-Comando resumen cada 30 mensajes (modo prueba)
+    # Interacciones por respuesta
+    if update.message.reply_to_message:
+        receptor = update.message.reply_to_message.from_user.full_name
+        interacciones[autor][receptor] += 1
 
-async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE): if mensaje_count >= 30: await context.bot.send_message(chat_id=update.effective_chat.id, text="\ud83d\udd39 Resumen del grupo: En el grupo ha habido bastante actividad con varias menciones e interacciones interesantes.") else: await context.bot.send_message(chat_id=update.effective_chat.id, text="Aún no hay suficientes mensajes para generar un resumen.")
+    # Reacciones automáticas por palabras clave
+    respuestas = {
+        "franco": "Arriba España 🤚",
+        "bro": ["Masivo bro", "Siempre ganando", "Hay niveles bro", "Fucking panzas"],
+        "moros": "Moros no, España no es un zoo.",
+        "negros": "No soy racista, soy ordenado. Dios creó el mundo en continentes, por algo será.",
+        "charo": [
+            "Sola y borracha quiero llegar a casa",
+            "La culpa es del heteropatriarcado",
+            "Pedro Sánchez es muy guapo"
+        ]
+    }
 
-Comando pareja del día (activado cuando hay suficiente interacción)
+    for palabra, respuesta in respuestas.items():
+        if palabra in texto.lower():
+            if isinstance(respuesta, list):
+                import random
+                await update.message.reply_text(random.choice(respuesta))
+            else:
+                await update.message.reply_text(respuesta)
 
-async def pareja_dia(update: Update, context: ContextTypes.DEFAULT_TYPE): top = ("", "", 0) for u1 in interacciones: for u2 in interacciones[u1]: if interacciones[u1][u2] > top[2]: top = (u1, u2, interacciones[u1][u2]) if top[2] >= 10: await context.bot.send_message(chat_id=update.effective_chat.id, text=f"💑 Pareja del día: {top[0]} & {top[1]} con {top[2]} interacciones") else: await context.bot.send_message(chat_id=update.effective_chat.id, text="Aún no hay suficiente interacción para determinar pareja del día.")
+# --- Main ---
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(TOKEN).build()
 
-Registrar mensajes
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("menciones_juan", menciones_juan))
+    app.add_handler(CommandHandler("interacciones", interacciones_globales))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, registrar_mensaje))
 
-async def mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE): global mensaje_count user = update.effective_user.first_name reply_to = update.message.reply_to_message
-
-mensajes_por_usuario[user] += 1
-mensaje_count += 1
-
-if "juan" in update.message.text.lower():
-    menciones_a_juan[user] += 1
-
-if reply_to:
-    otro = reply_to.from_user.first_name
-    interacciones[user][otro] += 1
-
-MAIN
-
-app = ApplicationBuilder().token(TOKEN).build()
-
-app.add_handler(CommandHandler("stats", stats)) app.add_handler(CommandHandler("interacciones", interacciones_globales)) app.add_handler(CommandHandler("menciones_juan", menciones_juan)) app.add_handler(CommandHandler("contador", contador)) app.add_handler(CommandHandler("resumen", resumen)) app.add_handler(CommandHandler("pareja_dia", pareja_dia)) app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mensaje))
-
-app.run_polling()
-
+    print("Bot en funcionamiento")
+    app.run_polling()
